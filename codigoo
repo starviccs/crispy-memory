@@ -1,0 +1,201 @@
+import cv2
+import numpy as np
+from ultralytics import YOLO
+
+
+
+# 0 = webcam
+# "video.mp4" = arquivo de vídeo
+VIDEO_SOURCE = "video.mp4"
+
+# Modelo YOLO leve
+model = YOLO("yolov8n.pt")
+
+# Confiança mínima da detecção
+CONFIANCA = 0.40
+
+# Zona definida em coordenadas proporcionais (0 a 1)
+# Cada ponto representa (X, Y)
+ZONA_NORMALIZADA = [
+    (0.15, 0.25),
+    (0.80, 0.25),
+    (0.90, 0.85),
+    (0.10, 0.85)
+]
+
+
+def converter_zona(largura, altura):
+    pontos = []
+
+    for x, y in ZONA_NORMALIZADA:
+        pixel_x = int(x * largura)
+        pixel_y = int(y * altura)
+
+        pontos.append([pixel_x, pixel_y])
+
+    return np.array(pontos, dtype=np.int32)
+
+
+
+
+def verificar_zona(poligono, ponto_pe):
+
+    resultado = cv2.pointPolygonTest(
+        poligono,
+        ponto_pe,
+        False
+    )
+
+    # Dentro ou exatamente na borda
+    return resultado >= 0
+
+
+
+video = cv2.VideoCapture(VIDEO_SOURCE)
+
+if not video.isOpened():
+    print("Erro: não foi possível abrir o vídeo.")
+    exit()
+
+print("Contador de pessoas iniciado!")
+
+
+
+while True:
+
+    # Capturar próximo frame
+    sucesso, frame = video.read()
+
+    if not sucesso:
+        break
+
+    altura, largura = frame.shape[:2]
+
+    # Converter a zona para pixels
+    zona = converter_zona(largura, altura)
+
+    # Contador de pessoas dentro da zona
+    pessoas_dentro = 0
+
+
+
+    resultados = model.predict(
+        frame,
+        conf=CONFIANCA,
+        verbose=False
+    )
+
+    # Percorrer as detecções
+    for resultado in resultados:
+
+        for caixa in resultado.boxes:
+
+            # Identificar a classe
+            classe = int(caixa.cls[0])
+
+            # Classe 0 = pessoa no COCO
+            if classe != 0:
+                continue
+
+            # Coordenadas da caixa
+            x1, y1, x2, y2 = map(
+                int,
+                caixa.xyxy[0].tolist()
+            )
+
+ 
+
+            pe_x = int((x1 + x2) / 2)
+            pe_y = y2
+
+            ponto_pe = (pe_x, pe_y)
+
+
+            dentro = verificar_zona(
+                zona,
+                ponto_pe
+            )
+
+            if dentro:
+                cor = (0, 255, 0)  # Verde
+                pessoas_dentro += 1
+                situacao = "DENTRO"
+
+            else:
+                cor = (0, 0, 255)  # Vermelho
+                situacao = "FORA"
+
+
+            cv2.rectangle(
+                frame,
+                (x1, y1),
+                (x2, y2),
+                cor,
+                2
+            )
+
+            # Desenhar o ponto do pé
+            cv2.circle(
+                frame,
+                ponto_pe,
+                5,
+                (255, 0, 0),
+                -1
+            )
+
+            # Texto de identificação
+            cv2.putText(
+                frame,
+                situacao,
+                (x1, max(y1 - 10, 20)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                cor,
+                2
+            )
+
+    cv2.polylines(
+        frame,
+        [zona],
+        True,
+        (255, 255, 0),
+        3
+    )
+
+
+
+    cv2.rectangle(
+        frame,
+        (10, 10),
+        (340, 65),
+        (30, 30, 30),
+        -1
+    )
+
+    cv2.putText(
+        frame,
+        f"Pessoas na zona: {pessoas_dentro}",
+        (20, 45),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.8,
+        (255, 255, 255),
+        2
+    )
+
+
+    cv2.imshow(
+        "Contador de Pessoas - YOLO",
+        frame
+    )
+
+    # ESC encerra o programa
+    if cv2.waitKey(1) & 0xFF == 27:
+        break
+
+
+video.release()
+cv2.destroyAllWindows()
+
+print("Programa finalizado!")
+
+
